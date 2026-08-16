@@ -18,7 +18,7 @@ type Phase = "idle" | "analyzing" | "done" | "error";
 export default function App() {
   const [health, setHealth] = useState<HealthInfo | null>(null);
   const [inputs, setInputs] = useState<ClientInput[]>([]);
-  const [model, setModel] = useState<string>("llama3:latest");
+  const [model, setModel] = useState<string>("");
   const [phase, setPhase] = useState<Phase>("idle");
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [log, setLog] = useState<
@@ -30,15 +30,20 @@ export default function App() {
     getHealth()
       .then((h) => {
         setHealth(h);
-        if (h.models.length > 0 && !h.models.includes(model))
-          setModel(h.defaultModel);
+        if (h.models.length > 0) {
+          if (!model || !h.models.includes(model)) {
+            setModel(h.models[0]);
+          }
+        } else {
+          setModel("");
+        }
       })
       .catch(() =>
         setHealth({
           status: "down",
           ollama: false,
           models: [],
-          defaultModel: "llama3:latest",
+          defaultModel: "",
         }),
       );
   }, []);
@@ -90,6 +95,11 @@ export default function App() {
 
   const onAnalyze = useCallback(async () => {
     if (inputs.length === 0) return;
+    if (!model) {
+      setLog([{ kind: "error", text: "Please select an AI model before running analysis." }]);
+      setPhase("error");
+      return;
+    }
     setPhase("analyzing");
     setResult(null);
     setLog([]);

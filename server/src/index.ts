@@ -56,7 +56,12 @@ app.post("/api/analyze", upload.array("files"), async (req, res) => {
   };
 
   const fields = req.body ?? {};
-  const model = (fields.model as string) || DEFAULT_MODEL;
+  const model = (fields.model as string) || "";
+  if (!model) {
+    send("error", { message: "No model selected. Please choose an AI model before running analysis." });
+    res.end();
+    return;
+  }
   let textInputs: ExtractedInput[] = [];
   try {
     if (typeof fields.inputs === "string") textInputs = JSON.parse(fields.inputs) as ExtractedInput[];

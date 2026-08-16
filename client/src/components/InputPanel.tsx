@@ -260,7 +260,8 @@ export default function InputPanel({
           onChange={(e) => onModelChange(e.target.value)}
           disabled={analyzing}
         >
-          {models.length === 0 && <option value={model}>{model}</option>}
+          {models.length === 0 && <option value="">No models available</option>}
+          {models.length > 0 && !model && <option value="">Select a model…</option>}
           {models.map((m) => (
             <option key={m} value={m}>
               {m}
@@ -272,7 +273,7 @@ export default function InputPanel({
       <button
         className="btn analyze"
         onClick={onAnalyze}
-        disabled={analyzing || inputs.length === 0}
+        disabled={analyzing || inputs.length === 0 || !model}
       >
         {analyzing ? "Analysing…" : "Run analysis →"}
       </button>
