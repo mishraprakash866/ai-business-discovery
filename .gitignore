@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.DS_Store
+*.log
+client/package-lock.json
+server/package-lock.json
+server/yarn.lock
+client/yarn.lock
+POC.pdf
