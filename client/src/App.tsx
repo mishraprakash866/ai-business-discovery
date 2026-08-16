@@ -25,6 +25,7 @@ export default function App() {
     { kind: "progress" | "warn" | "error"; text: string }[]
   >([]);
   const resultRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     getHealth()
@@ -100,6 +101,8 @@ export default function App() {
       setPhase("error");
       return;
     }
+    const controller = new AbortController();
+    abortRef.current = controller;
     setPhase("analyzing");
     setResult(null);
     setLog([]);
@@ -108,6 +111,7 @@ export default function App() {
         if (ev.type === "result") {
           setResult(ev);
           setPhase("done");
+          abortRef.current = null;
           setTimeout(
             () =>
               resultRef.current?.scrollIntoView({
@@ -119,6 +123,7 @@ export default function App() {
         } else if (ev.type === "error") {
           setLog((l) => [...l, { kind: "error", text: ev.message }]);
           setPhase("error");
+          abortRef.current = null;
         } else {
           setLog((l) => [
             ...l,
@@ -128,8 +133,9 @@ export default function App() {
             },
           ]);
         }
-      });
+      }, controller.signal);
     } catch (err) {
+      if (controller.signal.aborted) return;
       setLog((l) => [
         ...l,
         {
@@ -138,8 +144,16 @@ export default function App() {
         },
       ]);
       setPhase("error");
+      abortRef.current = null;
     }
   }, [inputs, model]);
+
+  const onCancel = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setLog((l) => [...l, { kind: "warn", text: "Analysis cancelled by user." }]);
+    setPhase("error");
+  }, []);
 
   return (
     <div className="app">
@@ -195,6 +209,7 @@ export default function App() {
             onClear={clearAll}
             onLoadSamples={loadSamples}
             onAnalyze={onAnalyze}
+            onCancel={onCancel}
             analyzing={phase === "analyzing"}
             log={log}
           />

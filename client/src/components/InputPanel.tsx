@@ -31,6 +31,7 @@ interface Props {
   onClear: () => void;
   onLoadSamples: () => Promise<void>;
   onAnalyze: () => void;
+  onCancel: () => void;
   analyzing: boolean;
   log: { kind: "progress" | "warn" | "error"; text: string }[];
 }
@@ -47,6 +48,7 @@ export default function InputPanel({
   onClear,
   onLoadSamples,
   onAnalyze,
+  onCancel,
   analyzing,
   log,
 }: Props) {
@@ -270,13 +272,24 @@ export default function InputPanel({
         </select>
       </div>
 
-      <button
-        className="btn analyze"
-        onClick={onAnalyze}
-        disabled={analyzing || inputs.length === 0 || !model}
-      >
-        {analyzing ? "Analysing…" : "Run analysis →"}
-      </button>
+      {analyzing ? (
+        <div className="analyze-row">
+          <button className="btn analyze" disabled>
+            <span className="btn-spinner" /> Analysing…
+          </button>
+          <button className="btn cancel" onClick={onCancel}>
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <button
+          className="btn analyze"
+          onClick={onAnalyze}
+          disabled={inputs.length === 0 || !model}
+        >
+          Run analysis →
+        </button>
+      )}
 
       {log.length > 0 && (
         <div className="log">

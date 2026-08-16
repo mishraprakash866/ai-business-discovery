@@ -170,10 +170,25 @@ export default function Results({
   }
 
   if (phase === "analyzing") {
+    const progressSteps = [
+      "Reading uploaded file(s)",
+      "Sending inputs to the local model",
+      "Model is analysing",
+      "Structuring the results",
+      "Validating the model output",
+    ];
+    const completedSteps = log.filter((l) => l.kind === "progress").length;
+    const pct = Math.min(Math.round((completedSteps / progressSteps.length) * 100), 95);
     const last = log[log.length - 1];
+
     return (
       <div className="empty">
-        <div className="spinner" />
+        <div className="progress-wrap">
+          <div className="progress-bar">
+            <div className="progress-fill" style={{ width: `${pct}%` }} />
+          </div>
+          <div className="progress-pct">{pct}%</div>
+        </div>
         <h2>Analysing your inputs…</h2>
         <p className="muted">This runs on your local Ollama model — it can take a minute or two.</p>
         {last && <div className="live-log">{last.text}</div>}

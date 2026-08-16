@@ -1,6 +1,21 @@
 const OLLAMA_HOST = process.env.OLLAMA_HOST ?? "http://localhost:11434";
 export const DEFAULT_MODEL = process.env.OLLAMA_MODEL ?? "llama3:latest";
 
+const MAX_RESPONSE_CHARS = 500_000;
+
+let activeOllamaAbort: AbortController | null = null;
+
+export function killActiveProcess(): void {
+  if (activeOllamaAbort) {
+    try {
+      activeOllamaAbort.abort();
+    } catch {
+      // already aborted
+    }
+    activeOllamaAbort = null;
+  }
+}
+
 export interface OllamaModel {
   name: string;
   size: number;
@@ -61,7 +76,10 @@ export async function analyzeInputs(
   sources: { name: string; type: string; content: string }[],
   model: string,
   onProgress: (msg: string) => void,
+  signal?: AbortSignal,
 ): Promise<string> {
+  if (signal?.aborted) throw new Error("Analysis was cancelled");
+
   const material = sources
     .map((s, i) => `--- SOURCE ${i + 1} (${s.type}: ${s.name}) ---\n${s.content}`)
     .join("\n\n");
@@ -79,44 +97,96 @@ export async function analyzeInputs(
     ],
   };
 
-  const res = await fetch(`${OLLAMA_HOST}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Ollama returned HTTP ${res.status}${text ? `: ${text.slice(0, 300)}` : ""}`);
-  }
-  if (!res.body) throw new Error("No response body from Ollama");
+  const ollamaCtrl = new AbortController();
+  activeOllamaAbort = ollamaCtrl;
 
-  onProgress("Model is analysing…");
+  const merged = new AbortController();
+  const onParentAbort = () => merged.abort();
+  const onOllamaAbort = () => merged.abort();
+  signal?.addEventListener("abort", onParentAbort, { once: true });
+  ollamaCtrl.signal.addEventListener("abort", onOllamaAbort, { once: true });
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
+  let firstTokenReceived = false;
+  let elapsed = 0;
   let full = "";
-  let done = false;
 
-  while (!done) {
-    const { value, done: d } = await reader.read();
-    done = d;
-    if (value) {
-      const chunk = decoder.decode(value, { stream: true });
-      for (const line of chunk.split("\n")) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith("{")) continue;
-        try {
-          const parsed = JSON.parse(trimmed) as { message?: { content?: string } };
-          if (parsed.message?.content) full += parsed.message.content;
-        } catch {
-          // partial JSON line, skip
+  const heartbeat = setInterval(() => {
+    if (merged.signal.aborted) return;
+    elapsed += 5;
+    if (!firstTokenReceived) {
+      onProgress(`Waiting for model to respond… (${elapsed}s)`);
+    } else {
+      onProgress(`Model is generating… ${full.length} chars so far (${elapsed}s)`);
+    }
+  }, 5000);
+
+  const cleanup = () => {
+    clearInterval(heartbeat);
+    signal?.removeEventListener("abort", onParentAbort);
+    ollamaCtrl.signal.removeEventListener("abort", onOllamaAbort);
+    activeOllamaAbort = null;
+  };
+
+  try {
+    const res = await fetch(`${OLLAMA_HOST}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: merged.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Ollama returned HTTP ${res.status}${text ? `: ${text.slice(0, 300)}` : ""}`);
+    }
+    if (!res.body) throw new Error("No response body from Ollama");
+
+    onProgress("Model is analysing…");
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let done = false;
+
+    try {
+      while (!done) {
+        if (merged.signal.aborted) {
+          reader.cancel().catch(() => {});
+          throw new Error("Analysis was cancelled");
+        }
+        const { value, done: d } = await reader.read();
+        done = d;
+        if (value) {
+          if (!firstTokenReceived) {
+            firstTokenReceived = true;
+            onProgress("First tokens received — generating response…");
+          }
+          const chunk = decoder.decode(value, { stream: true });
+          for (const line of chunk.split("\n")) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith("{")) continue;
+            try {
+              const parsed = JSON.parse(trimmed) as { message?: { content?: string } };
+              if (parsed.message?.content) full += parsed.message.content;
+            } catch {
+              // partial JSON line, skip
+            }
+          }
+        }
+        if (full.length > MAX_RESPONSE_CHARS) {
+          reader.cancel().catch(() => {});
+          ollamaCtrl.abort();
+          throw new Error(`Response exceeded ${MAX_RESPONSE_CHARS} characters — aborting to prevent memory exhaustion`);
         }
       }
+    } catch (err) {
+      if (merged.signal.aborted) throw new Error("Analysis was cancelled");
+      throw err;
     }
-  }
 
-  onProgress("Structuring the results…");
-  return full;
+    onProgress("Structuring the results…");
+    return full;
+  } finally {
+    cleanup();
+  }
 }
 
 export function extractJsonObject(text: string): unknown {

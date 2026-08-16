@@ -3,7 +3,15 @@ import express from "express";
 import cors from "cors";
 import multer from "multer";
 import { extractFile, extractUrl, truncate, type ExtractedInput } from "./extract.js";
-import { analyzeInputs, extractJsonObject, listModels, ollamaRunning, normalizeAnalysis, DEFAULT_MODEL } from "./ai.js";
+import {
+  analyzeInputs,
+  extractJsonObject,
+  listModels,
+  ollamaRunning,
+  normalizeAnalysis,
+  killActiveProcess,
+  DEFAULT_MODEL,
+} from "./ai.js";
 import { SAMPLE_PACK } from "./samples.js";
 
 const app = express();
@@ -49,16 +57,52 @@ app.post("/api/analyze", upload.array("files"), async (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
-  const send = (type: string, data: Record<string, unknown>) => {
-    res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`);
+  const controller = new AbortController();
+  let clientGone = false;
+
+  const cleanup = () => {
+    clientGone = true;
+    controller.abort();
+    killActiveProcess();
+  };
+
+  res.on("close", cleanup);
+
+  const MAX_SSE_PAYLOAD = 64_000;
+
+  const safeWrite = (type: string, data: Record<string, unknown>): boolean => {
+    if (clientGone || res.writableEnded) return false;
+    try {
+      const payload = JSON.stringify({ type, ...data });
+      if (payload.length > MAX_SSE_PAYLOAD) {
+        const chunkSize = MAX_SSE_PAYLOAD;
+        for (let i = 0; i < payload.length; i += chunkSize) {
+          if (clientGone || res.writableEnded) return false;
+          const slice = payload.slice(i, i + chunkSize);
+          const isLast = i + chunkSize >= payload.length;
+          const event = isLast
+            ? `data: ${JSON.stringify({ type: "chunk", id: type, final: true, data: slice })}\n\n`
+            : `data: ${JSON.stringify({ type: "chunk", id: type, final: false, data: slice })}\n\n`;
+          res.write(event);
+        }
+        return true;
+      }
+      res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`);
+      return true;
+    } catch {
+      clientGone = true;
+      controller.abort();
+      return false;
+    }
   };
 
   const fields = req.body ?? {};
   const model = (fields.model as string) || "";
   if (!model) {
-    send("error", { message: "No model selected. Please choose an AI model before running analysis." });
+    safeWrite("error", { message: "No model selected. Please choose an AI model before running analysis." });
     res.end();
     return;
   }
@@ -74,43 +118,54 @@ app.post("/api/analyze", upload.array("files"), async (req, res) => {
   try {
     const sources: ExtractedInput[] = [...textInputs];
 
-    send("progress", { message: `Reading ${files.length} uploaded file(s)…` });
+    safeWrite("progress", { message: `Reading ${files.length} uploaded file(s)…` });
     for (const f of files) {
+      if (clientGone) break;
       try {
         const input = await extractFile(f.buffer, f.originalname, f.mimetype);
         sources.push(input);
       } catch (err) {
-        send("warn", {
+        safeWrite("warn", {
           message: `Could not read "${f.originalname}": ${err instanceof Error ? err.message : "unknown error"}`,
         });
       }
     }
+
+    if (clientGone) return;
 
     const readable = sources.filter((s) => s.content.trim().length > 0);
     if (readable.length === 0) {
       throw new Error("No readable content was provided. Add files, text, a URL, or load the sample pack.");
     }
 
-    send("progress", { message: `Analysing ${readable.length} input(s) with ${model}…` });
+    safeWrite("progress", { message: `Analysing ${readable.length} input(s) with ${model}…` });
     const raw = await analyzeInputs(
       readable.map((s) => ({ name: s.name, type: s.type, content: truncate(s.content) })),
       model,
-      (msg) => send("progress", { message: msg }),
+      (msg) => safeWrite("progress", { message: msg }),
+      controller.signal,
     );
 
-    send("progress", { message: "Validating the model output…" });
+    if (clientGone) return;
+
+    safeWrite("progress", { message: "Validating the model output…" });
     const parsed = extractJsonObject(raw) as Record<string, unknown>;
     const normalized = normalizeAnalysis(parsed);
 
-    send("result", {
+    safeWrite("result", {
       model,
       inputs: readable.map((s) => ({ name: s.name, type: s.type, chars: s.content.length })),
       analysis: normalized,
     });
   } catch (err) {
-    send("error", { message: err instanceof Error ? err.message : "Unexpected analysis failure" });
+    if (clientGone || controller.signal.aborted) return;
+    const msg = err instanceof Error ? err.message : "Unexpected analysis failure";
+    safeWrite("error", { message: msg });
   } finally {
-    res.end();
+    killActiveProcess();
+    if (!res.writableEnded && !clientGone) {
+      res.end();
+    }
   }
 });
 

@@ -483,6 +483,77 @@ body {
   }
 }
 
+/* ---------- Progress bar ---------- */
+.progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 auto 18px;
+  max-width: 320px;
+}
+
+.progress-bar {
+  flex: 1;
+  height: 8px;
+  background: #e0e7ff;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #7c3aed);
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+.progress-pct {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-dark);
+  min-width: 36px;
+  text-align: right;
+}
+
+/* ---------- Analyze / Cancel row ---------- */
+.analyze-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.analyze-row .btn.analyze {
+  flex: 1;
+  margin-top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn.cancel {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: var(--red);
+  font-weight: 700;
+}
+
+.btn.cancel:hover:not(:disabled) {
+  background: #fee2e2;
+  border-color: #f87171;
+}
+
+.btn-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex: none;
+}
+
 .live-log {
   margin-top: 16px;
   font-weight: 600;
