@@ -6,6 +6,43 @@ Candidate assignment submission. A working application that takes **scattered cl
 
 ---
 
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                     Client (React + Vite)                │
+│  ┌─────────────┐  ┌──────────────┐  ┌────────────────┐  │
+│  │ InputPanel  │  │   Results    │  │  PocPrototype  │  │
+│  │ (sidebar)   │  │  (tabs)      │  │  (phone mock)  │  │
+│  └──────┬──────┘  └──────┬───────┘  └────────────────┘  │
+│         │                │                               │
+│         └────────┬───────┘                               │
+│                  │ api.ts (SSE streaming)                │
+└──────────────────┼───────────────────────────────────────┘
+                   │ HTTP (proxied via Vite dev server)
+┌──────────────────┼───────────────────────────────────────┐
+│                  ▼     Server (Express + TypeScript)      │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │              index.ts (Express API)                │  │
+│  │  - POST /api/analyze   (SSE streaming endpoint)   │  │
+│  │  - GET  /api/health    (Ollama status check)      │  │
+│  │  - GET  /api/samples   (sample data metadata)     │  │
+│  │  - POST /api/extract-url (website scraping)       │  │
+│  └──────────┬──────────────────┬─────────────────────┘  │
+│             │                  │                         │
+│  ┌──────────▼─────┐  ┌────────▼────────┐               │
+│  │  ai.ts         │  │  extract.ts     │               │
+│  │  (Ollama       │  │  (PDF/DOCX/URL  │               │
+│  │   client)      │  │   extraction)   │               │
+│  └───────┬────────┘  └─────────────────┘               │
+│          │                                              │
+│  ┌───────▼──────────────┐                               │
+│  │  Ollama (localhost)  │                               │
+│  │  llama3:latest       │                               │
+│  └──────────────────────┘                               │
+└──────────────────────────────────────────────────────────┘
+```
+
 ## How to run
 
 ### Prerequisites
@@ -39,11 +76,11 @@ Open http://localhost:5173, click **"Load sample client pack"** and then **"Run 
 
 Set in the environment before starting the server:
 
-| Variable        | Default             | Purpose                                    |
-| --------------- | ------------------- | ------------------------------------------ |
-| `OLLAMA_HOST`   | `http://localhost:11434` | Ollama endpoint                        |
-| `OLLAMA_MODEL`  | `llama3:latest`     | Default model (can be changed in the UI)   |
-| `PORT`          | `3001`              | API port                                   |
+| Variable       | Default                  | Purpose                                  |
+| -------------- | ------------------------ | ---------------------------------------- |
+| `OLLAMA_HOST`  | `http://localhost:11434` | Ollama endpoint                          |
+| `OLLAMA_MODEL` | `llama3:latest`          | Default model (can be changed in the UI) |
+| `PORT`         | `3001`                   | API port                                 |
 
 ---
 
@@ -61,14 +98,14 @@ Streaming: analysis runs as server-sent events so the UI shows live progress ("r
 
 ## Design decisions
 
-| Decision | Rationale |
-| --- | --- |
-| **Local Ollama instead of a hosted LLM** | Assignment emphasises a self-contained POC; no API keys, works offline, cost-free. Model is selectable in the UI. |
-| **Structured JSON from the model** | A strict schema (`goal`, `current_process`, `pain_points`, `improvements`, `solution`, `poc`) is passed in the system prompt and `format: "json"` is forced, so the analysis is predictable and renderable. A defensive parser strips markdown fences and finds the outermost `{…}`. |
-| **SSE streaming** | Local models are slow (8B+ models); streaming progress keeps the UX honest instead of a silent wait. |
-| **Server-side file extraction** | PDFs (pdf-parse), DOCX (mammoth), and text formats are decoded on the API, so the browser never needs to parse documents. Screenshots are accepted and surfaced as "unreadable without OCR" so no input silently disappears. |
-| **Simple but complete stack** | Express + React (Vite). No heavy state library, no UI framework — keeps the deliverable small and the engineering easy to follow. |
-| **Built-in sample pack** | A realistic multi-source client story (2 transcripts + WhatsApp export + process doc) that demos every part of the tool with one click — also used by reviewers who don't have real client data. |
+| Decision                                 | Rationale                                                                                                                                                                                                                                                                            |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Local Ollama instead of a hosted LLM** | Assignment emphasises a self-contained POC; no API keys, works offline, cost-free. Model is selectable in the UI.                                                                                                                                                                    |
+| **Structured JSON from the model**       | A strict schema (`goal`, `current_process`, `pain_points`, `improvements`, `solution`, `poc`) is passed in the system prompt and `format: "json"` is forced, so the analysis is predictable and renderable. A defensive parser strips markdown fences and finds the outermost `{…}`. |
+| **SSE streaming**                        | Local models are slow (8B+ models); streaming progress keeps the UX honest instead of a silent wait.                                                                                                                                                                                 |
+| **Server-side file extraction**          | PDFs (pdf-parse), DOCX (mammoth), and text formats are decoded on the API, so the browser never needs to parse documents. Screenshots are accepted and surfaced as "unreadable without OCR" so no input silently disappears.                                                         |
+| **Simple but complete stack**            | Express + React (Vite). No heavy state library, no UI framework — keeps the deliverable small and the engineering easy to follow.                                                                                                                                                    |
+| **Built-in sample pack**                 | A realistic multi-source client story (2 transcripts + WhatsApp export + process doc) that demos every part of the tool with one click — also used by reviewers who don't have real client data.                                                                                     |
 
 ## Project structure
 
